@@ -16,8 +16,14 @@ data2 = pd.read_csv(file_path_2)
 # making local copies of original dataset 
 fees = data1.copy() 
 cash = data2.copy()
-
+cash = cash[(cash["status"] != "rejected") | (cash["status"] != "canceled")]
 ###############################################################################
+
+# calculating incident counts per cash request
+df_inc = fees.groupby("cash_request_id").size().reset_index(name="incident_count")
+
+df_inc["cash_request_id"] = df_inc["cash_request_id"].astype(int)
+
 
 # EDA
 st.title("EDA on Datasets")
@@ -209,6 +215,7 @@ st.markdown("""```python\nfees_agg_revenue.reset_index()\n```""")
 fees_agg_revenue.reset_index()
 st.dataframe(fees_agg_revenue)
 
+
 st.write("")
 
 # Merging fees_agg_revenue and cash
@@ -216,6 +223,9 @@ st.markdown("<h3 style='font-size:24px;'>Merging fees_agg_revenue and cash:</h3>
 st.write("Processed data sets cash and fees_agg_revenue are ready to be merged:")
 st.markdown("""```python\ndf = cash.merge(fees_agg_revenue, how ='left', left_on='id', right_on='cash_request_id')\n```""")
 df = cash.merge(fees_agg_revenue, how ='left', left_on='id', right_on='cash_request_id')
+df = df.merge(df_inc, how ='left', left_on='id', right_on='cash_request_id')
+# filling NaNs with 0, in case it's going to affect incident rate calculation
+df["incident_count"] = df["incident_count"].fillna(0)
 st.markdown("""```python\ndf\n```""")
 st.dataframe(df)
 
@@ -231,7 +241,7 @@ st.title("Metrics to Analyze")
 st.markdown("<h3 style='font-size:24px;'>Frequency of Service Usage:</h3>", unsafe_allow_html=True)
 st.write("To understand how often users from each cohort utilize IronHack Payments' cash advance services over time.")
 st.markdown("""```python\nfreq_usage = df.groupby(["cohort_month", "activity_month"])["user_id"].count().reset_index()\n```""")
-freq_usage = df.groupby(["cohort_month", "activity_month"])["user_id"].count().reset_index()
+freq_usage = df.groupby(["cohort_month", "activity_month", "cohort_index"])["user_id"].count().reset_index()
 freq_usage.rename(columns={"user_id": "cash_request_attempt"}, inplace=True)
 st.markdown("""```python\nfreq_usage\n```""")
 st.dataframe(freq_usage)
@@ -241,15 +251,14 @@ st.write("")
 # Incident Rate
 st.markdown("<h3 style='font-size:24px;'>Incident Rate:</h3>", unsafe_allow_html=True)
 st.write("""Calculate Incident Rate (assuming "rejected" marks payment issues):""")
-st.markdown("""```python\nincident_df = df[df["status"] == "rejected"]\n```""")
-incident_df = df[df["status"] == "rejected"]  # Assuming "rejected" marks payment issues
+st.markdown("""```python\ndf = df[df["status"] == "rejected"]\n```""")
+# df = df[df["status"] == "rejected"]  # Assuming "rejected" marks payment issues
 st.markdown("""```python\nincident_rate = (
-    incident_df.groupby(["cohort_month", "activity_month"])["user_id"]
-    .count()
+    df.groupby(["cohort_month", "activity_month"])["incident_count"]
+    .sum()
     .reset_index()
-    .rename(columns={"user_id": "incident_count"})
 )\n```""")
-incident_rate = incident_df.groupby(["cohort_month", "activity_month"])["user_id"].count().reset_index().rename(columns={"user_id": "incident_count"})
+incident_rate = df.groupby(["cohort_month", "activity_month", "cohort_index"])["incident_count"].sum().reset_index()
 
 st.markdown("""```python\nincident_rate\n```""")
 st.dataframe(incident_rate)
@@ -264,7 +273,7 @@ st.markdown("""
 cohort_analysis["incident_count"] = cohort_analysis["incident_count"].fillna(0)\n
 cohort_analysis["incident_rate"] = cohort_analysis["incident_count"] / cohort_analysis["cash_request_attempt"]""")
 
-cohort_analysis = pd.merge(freq_usage, incident_rate, on=["cohort_month", "activity_month"], how="left")
+cohort_analysis = pd.merge(freq_usage, incident_rate, on=["cohort_month", "activity_month", "cohort_index"], how="left")
 cohort_analysis["incident_count"] = cohort_analysis["incident_count"].fillna(0)
 cohort_analysis["incident_rate"] = cohort_analysis["incident_count"] / cohort_analysis["cash_request_attempt"]
 
@@ -332,7 +341,7 @@ cohort_analysis = cohort_analysis.merge(df, on=["cohort_month", "activity_month"
 # st.dataframe(cohort_analysis)
 # st.dataframe(df)
 
-st.write()
+st.write("")
 
 ###############################################################################
 
@@ -370,7 +379,7 @@ st.line_chart(cohort_analysis.set_index("activity_month")["cash_request_attempt"
 # Incident Rate Plot
 st.write("## Incident Rate by Cohort")
 fig, ax = plt.subplots()
-sns.lineplot(data=cohort_analysis, x="activity_month", y="incident_rate", palette="tab10", ax=ax)
+sns.lineplot(data=cohort_analysis, x="activity_month", y="incident_rate", hue="cohort_month", palette="tab10", ax=ax)
 plt.xticks(rotation=45)
 st.pyplot(fig)
 # hue="cohort_month"
@@ -378,7 +387,7 @@ st.pyplot(fig)
 # Revenue Plot
 st.write("## Revenue Generated")
 fig, ax = plt.subplots()
-sns.lineplot(data=cohort_analysis, x="activity_month", y="amount", palette="tab10", ax=ax)
+sns.lineplot(data=cohort_analysis, x="activity_month", y="total_amount", hue="cohort_month", palette="tab10", ax=ax)
 plt.xticks(rotation=45)
 st.pyplot(fig)
 # hue="cohort_month"
